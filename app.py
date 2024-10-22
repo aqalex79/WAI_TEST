@@ -6,14 +6,77 @@ import google.generativeai as genai
 import streamlit.components.v1 as components
 import textwrap
 import re
-import traceback
 from datetime import datetime
+import io
 
 # Load environment variables
 load_dotenv()
 
 # Configure Google API key for LLM
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+# 统一的 CSS 样式
+css = """
+<style>
+.stApp {
+    max-width: 800px;
+    margin: 0 auto;
+    font-family: Arial, sans-serif;
+    padding-bottom: 70px;
+}
+
+.upload-btn {
+    background-color: #a8d8bf !important;
+    color: black !important;
+    font-weight: bold !important;
+    border-radius: 20px !important;
+    padding: 0.5em 1em !important;
+}
+
+.provide-recommendation-btn, .log-activity-btn {
+    background-color: #FFC0CB !important;
+    color: black !important;
+    font-weight: bold !important;
+    border-radius: 20px !important;
+    padding: 0.5em 1em !important;
+}
+
+/* Navigation styles */
+.nav-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background-color: white;
+    padding: 10px;
+    box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+    z-index: 1000;
+}
+
+.nav-button {
+    background-color: transparent;
+    border: none;
+    color: black;
+    padding: 10px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    width: 33.33%;
+    transition: all 0.3s ease;
+}
+
+.nav-button:hover {
+    background-color: #e9ecef;
+    transform: translateY(-5px);
+}
+
+.nav-button.active {
+    color: #4a90e2;
+    background-color: #e3f2fd;
+}
+
+</style>
+"""
 
 def get_gemini_response(input_text, image, prompt):
     try:
@@ -53,6 +116,17 @@ def parse_nutritional_values(llm_response):
                 nutritional_values[nutrient] = round(float(value))
 
     return nutritional_values
+
+def navigation():
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("👤 Profile", use_container_width=True):
+            st.switch_page("pages/1_Profile.py")
+    with col2:
+        st.button("🕒 Recommendations", use_container_width=True, type="primary")
+    with col3:
+        if st.button("📝 Meal Log", use_container_width=True):
+            st.switch_page("pages/3_Meal_Log.py")
 
 def nutrition_bar_chart(nutritional_values):
     return f"""
@@ -108,61 +182,9 @@ def nutrition_bar_chart(nutritional_values):
 
 def main():
     st.set_page_config(page_title="Food-Recognition", page_icon="🥗", layout="wide")
+    st.markdown(css, unsafe_allow_html=True)
     
-    # Custom CSS
-    st.markdown("""
-    <style>
-    .stApp {
-        max-width: 800px;
-        margin: 0 auto;
-        font-family: Arial, sans-serif;
-    }
-    .upload-btn {
-        background-color: #a8d8bf !important;
-        color: black !important;
-        font-weight: bold !important;
-        border-radius: 20px !important;
-        padding: 0.5em 1em !important;
-    }
-    .provide-recommendation-btn, .log-activity-btn {
-        background-color: #FFC0CB !important;
-        color: black !important;
-        font-weight: bold !important;
-        border-radius: 20px !important;
-        padding: 0.5em 1em !important;
-    }
-    .footer-nav {
-        position: fixed;
-        bottom: 0;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 100%;
-        max-width: 800px;
-        display: flex;
-        justify-content: space-around;
-        background-color: #f8f8f8;
-        padding: 10px 0;
-        box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
-    }
-    .footer-nav a {
-        text-decoration: none;
-        color: black;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        font-size: 12px;
-    }
-    .footer-nav img {
-        width: 24px;
-        height: 24px;
-        margin-bottom: 4px;
-    }
-    .footer-nav a.active {
-        color: #4a90e2;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
+    # Main content container
     st.header("Meal Recommendation")
 
     uploaded_file = st.file_uploader("Upload Photo", type=["jpg", "jpeg", "png"], key="upload_photo")
@@ -194,13 +216,12 @@ def main():
             st.write(st.session_state['food_items'])
     
             st.write("### Nutritional Analysis and PCOS Recommendations")
-            if st.button("Provide Recommendation", key="provide_recommendation", help="Get nutritional analysis and PCOS recommendations"):
+            if st.button("Provide Recommendation", key="provide_recommendation"):
                 try:
-                    # Nutritional Analysis
                     nutrition_prompt = textwrap.dedent(f"""
                     Provide a nutritional analysis for the following dish:
                     {st.session_state['food_items']}
-                    Just simply display(no extra wordings) the nutritional values as percentages for protein, fat, carbs, and fiber. Please use assumptions for the weight of the dish.
+                    Just simply display(no extra wordings) the nutritional values as percentages for protein, fat, carbs, and fiber.
                     Format your response like this:
                     Protein: X%
                     Fat: Y%
@@ -213,73 +234,62 @@ def main():
                     nutritional_values = parse_nutritional_values(nutrition_response)
 
                     st.write("### Overall: ⭐⭐⭐⭐")
-                    
                     st.write("### Summary:")
-                    st.write("Increase protein and fiber intake or Undertake light exercise such as walks to reduce the sugar spike")
+                    st.write("Increase protein and fiber intake or undertake light exercise such as walks to reduce the sugar spike")
 
                     st.write("### Details:")
                     components.html(nutrition_bar_chart(nutritional_values), height=300, scrolling=True)
 
-                    # PCOS Recommendations
                     pcos_prompt = textwrap.dedent(f"""
                     Act as a nutritionist specializing in managing PCOS (Polycystic Ovary Syndrome) and provide nutritional recommendations for the following dish:
                     {st.session_state['food_items']}
                     Focus on these 4 key areas:
-                    1. Blood Sugar Balance: How well does the meal help maintain stable blood sugar levels? Are the carbs healthy (whole grains, veggies), and does it avoid sugars or refined carbs?
-                    2. Protein & Healthy Fats: Does the meal include enough quality protein and healthy fats (like those from fish, nuts, or avocado) to support hormone balance and keep hunger in check?
-                    3. Fiber & Nutrients: Does the meal include fiber (from veggies, whole grains) and important nutrients (vitamin D, magnesium, omega-3s) that support PCOS?
-                    4. Inflammation & Portion Control: Does the meal contain anti-inflammatory ingredients (like omega-3s, turmeric) and are the portion sizes suitable for managing weight?
-                    Please provide simple, actionable feedback in these 4 categories, and suggest any easy improvements for a PCOS-friendly diet.
+                    1. Blood Sugar Balance
+                    2. Protein & Healthy Fats
+                    3. Fiber & Nutrients
+                    4. Inflammation & Portion Control
+                    Please provide simple, actionable feedback in these categories.
                     """)
 
                     pcos_response = get_gemini_response("PCOS Recommendations", image_content, pcos_prompt)
-
                     st.subheader("PCOS Diet Recommendations")
                     st.write(pcos_response)
 
-                    # Save rating to session state
-                    st.session_state['current_meal_rating'] = 4  # Default rating, you can add input for user rating
+                    st.session_state['current_meal_rating'] = 4
 
                 except Exception as e:
-                    st.error("Error during analysis and recommendation generation. Please try again.")
-                    st.error(f"Details: {str(e)}")
+                    st.error(f"Error during analysis: {str(e)}")
 
         except Exception as e:
             st.error(f"Error during image analysis: {e}")
 
-    if st.button("Log Activity", key="log_activity", help="Log this meal activity"):
+    if st.button("Log Activity", key="log_activity"):
         if 'food_items' in st.session_state and uploaded_file:
-            new_meal = {
-                "name": st.session_state['food_items'],
-                "time": datetime.now().strftime("%I:%M %p"),
-                "rating": st.session_state.get('current_meal_rating', 0),
-                "image": uploaded_file
-            }
-            if 'meal_log' not in st.session_state:
-                st.session_state.meal_log = []
-            st.session_state.meal_log.append(new_meal)
-            st.success("Activity logged successfully! This meal has been recorded in your Meal Log.")
-            st.markdown("[View Meal Log](meal_log)")
+            try:
+                image_bytes = io.BytesIO()
+                image = Image.open(uploaded_file)
+                image.save(image_bytes, format='PNG')
+                
+                new_meal = {
+                    "name": st.session_state['food_items'],
+                    "time": datetime.now().strftime("%I:%M %p"),
+                    "rating": st.session_state.get('current_meal_rating', 0),
+                    "image": image_bytes.getvalue()
+                }
+                
+                if 'meal_log' not in st.session_state:
+                    st.session_state.meal_log = []
+                
+                st.session_state.meal_log.append(new_meal)
+                st.success("Activity logged successfully!")
+                st.switch_page("pages/3_Meal_Log.py")
+            except Exception as e:
+                st.error(f"Error saving meal log: {str(e)}")
         else:
-            st.write("Please upload a dish image and analyze it before logging activity.")
+            st.warning("Please upload a dish image and analyze it first.")
 
-    footer_html = """
-    <div class="footer-nav">
-        <a href="page1.html">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld2JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0yMCAyMXYtMmE0IDQgMCAwIDAtNC00SDhhNCA0IDAgMCAwLTQgNHYyIiAvPjxjaXJjbGUgY3g9IjEyIiBjeT0iNyIgcj0iNCI+PC9jaXJjbGU+PC9zdmc+" alt="Profile">
-            <span>Profile</span>
-        </a>
-        <a href="#" class="active">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld2JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjEwIj48L2NpcmNsZT48cG9seWxpbmUgcG9pbnRzPSIxMiA2IDEyIDEyIDE2IDE0Ij48L3BvbHlsaW5lPjwvc3ZnPg==" alt="Meal Recommendations">
-            <span>Meal Recommendations</span>
-        </a>
-        <a href="#">
-            <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld2JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xNCAySDZhMiAyIDAgMCAwLTIgMnYxNmEyIDIgMCAwIDAgMiAyaDEyYTIgMiAwIDAgMCAyLTJWOHoiIC8+PHBvbHlsaW5lIHBvaW50cz0iMTQgMiAxNCA4IDIwIDgiPjwvcG9seWxpbmU+PGxpbmUgeDE9IjE2IiB5MT0iMTMiIHgyPSI4IiB5Mj0iMTMiPjwvbGluZT48bGluZSB4MT0iMTYiIHkxPSIxNyIgeDI9IjgiIHkyPSIxNyI+PC9saW5lPjxwb2x5bGluZSBwb2ludHM9IjEwIDkgOSA5IDggOSI+PC9wb2x5bGluZT48L3N2Zz4=" alt="Meal Log">
-            <span>Meal Log</span>
-        </a>
-    </div>
-    """
-    st.markdown(footer_html, unsafe_allow_html=True)
+    # Add navigation
+    navigation()
 
 if __name__ == "__main__":
     main()
