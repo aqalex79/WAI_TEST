@@ -8,6 +8,7 @@ import textwrap
 import re
 from datetime import datetime
 import io
+import json
 
 # Load environment variables
 load_dotenv()
@@ -33,7 +34,7 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
 }
 
 div[data-testid="column"] > div[data-testid="stVerticalBlock"] > div > button {
-    width: 100% !important;  /* 改为100%填充父容器 */
+    width: 100% !important;
     height: auto !important;
     min-height: 50px !important;
     padding: 8px 4px !important;
@@ -55,12 +56,12 @@ div[data-testid="stHorizontalBlock"] {
     padding: 8px !important;
 }
 
-/* Main container - 添加底部间距防止内容被遮挡 */
+/* Main container padding */
 .stApp {
-    padding-bottom: 80px !important;  /* 确保内容不被导航栏遮挡 */
+    padding-bottom: 80px !important;
 }
 
-/* 确保内容可以滚动 */
+/* Ensure content scrolling */
 [data-testid="stAppViewContainer"] {
     height: calc(100vh - 80px) !important;
     overflow-y: auto !important;
@@ -88,25 +89,6 @@ div[data-testid="stHorizontalBlock"] {
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     margin-bottom: 20px;
 }
-
-/* Other buttons */
-.stButton > button.upload-btn {
-    background-color: #a8d8bf !important;
-    color: black !important;
-    border-radius: 12px !important;
-    padding: 8px 16px !important;
-    border: none !important;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
-}
-
-.stButton > button.recommend-btn {
-    background-color: #FFC0CB !important;
-    color: black !important;
-    border-radius: 12px !important;
-    padding: 8px 16px !important;
-    border: none !important;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
-}
 </style>
 """
 
@@ -120,7 +102,6 @@ def navigation():
     with cols[2]:
         if st.button("📝\nMeal Log", use_container_width=True):
             st.switch_page("pages/3_Meal_Log.py")
-
 
 def get_gemini_response(input_text, image, prompt):
     try:
@@ -146,86 +127,166 @@ def parse_nutritional_values(llm_response):
         'fiber': 0
     }
 
-    patterns = [
-        r'(\w+):\s*(\d+(?:\.\d+)?)%',
-        r'(\w+):\s*(\d+(?:\.\d+)?)',
-        r'(\w+)\s*:\s*(\d+(?:\.\d+)?)',
-    ]
+    try:
+        # 更严格的匹配模式
+        patterns = [
+            r'(\w+):\s*(\d+(?:\.\d+)?)\s*%?',  # 匹配百分比或没有百分比的数字
+        ]
 
-    for pattern in patterns:
-        matches = re.findall(pattern, llm_response, re.IGNORECASE)
-        for nutrient, value in matches:
-            nutrient = nutrient.lower()
-            if nutrient in nutritional_values:
-                nutritional_values[nutrient] = round(float(value))
+        for pattern in patterns:
+            matches = re.findall(pattern, llm_response, re.IGNORECASE)
+            for nutrient, value in matches:
+                nutrient = nutrient.lower().strip()
+                if nutrient in nutritional_values:
+                    try:
+                        nutritional_values[nutrient] = round(float(value))
+                    except ValueError:
+                        continue
 
-    return nutritional_values
+        return nutritional_values
+    except Exception:
+        return nutritional_values  # 返回默认值
 
-def navigation():
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("👤 Profile", use_container_width=True):
-            st.switch_page("pages/1_Profile.py")
-    with col2:
-        st.button("🕒 Recommendations", use_container_width=True, type="primary")
-    with col3:
-        if st.button("📝 Meal Log", use_container_width=True):
-            st.switch_page("pages/3_Meal_Log.py")
+def get_pcos_analysis(food_items, image_content, meal_type):
+    # Get user symptoms and dietary preference from session state
+    symptoms = st.session_state.get('selected_symptoms', [])
+    dietary_preference = st.session_state.get('dietary_preference', '')
+    
+    pcos_prompt = textwrap.dedent(f"""
+    You are a nutritionist specializing in managing PCOS (Polycystic Ovary Syndrome) through diet.
+    
+    Meal Information:
+    Time: {meal_type}
+    Dietary Preference: {dietary_preference}
+    User Symptoms: {', '.join(symptoms)}
+    Food Items: {food_items}
+    
+    Provide concise, structured feedback without detailed explanations following exactly this format:
+    
+    PCOS_SCORE: [Promising/Can Do Better/Needs Improvement]
+    
+    FOCUS_AREAS:
+    Hormonal Balance & Insulin Sensitivity|[1-5]|[brief explanation]
+    Inflammation Control & Gut Health|[1-5]|[brief explanation]
+    Energy & Mental Health|[1-5]|[brief explanation]
+    Reproductive Health & Fertility|[1-5]|[brief explanation]
+    
+    SUGGESTIONS:
+    Quick Fix: [immediate adjustment]
+    Swap Out: [healthier alternative]
+    Pro Moves: [advanced recommendation]
+    """)
+    
+    return get_gemini_response("PCOS Analysis", image_content, pcos_prompt)
+
+def parse_pcos_response(response_text):
+    """Parse PCOS analysis response into structured data"""
+    lines = response_text.strip().split('\n')
+    data = {
+        'pcos_score': '',
+        'focus_areas': {},
+        'suggestions': {}
+    }
+    
+    current_section = None
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        if line.startswith('PCOS_SCORE:'):
+            data['pcos_score'] = line.split(':', 1)[1].strip()
+            
+        elif 'FOCUS_AREAS:' in line:
+            current_section = 'focus_areas'
+            continue
+            
+        elif 'SUGGESTIONS:' in line:
+            current_section = 'suggestions'
+            continue
+            
+        if current_section == 'focus_areas':
+            if '|' in line:
+                try:
+                    area, score, explanation = line.split('|')
+                    # 添加错误处理来确保score是一个有效的数字
+                    score_str = score.strip('[]').strip()
+                    try:
+                        score_value = int(score_str)
+                        data['focus_areas'][area.strip()] = {
+                            'score': score_value,
+                            'explanation': explanation.strip()
+                        }
+                    except ValueError:
+                        # 如果无法解析为整数，使用默认值3
+                        data['focus_areas'][area.strip()] = {
+                            'score': 3,
+                            'explanation': explanation.strip()
+                        }
+                except Exception:
+                    continue
+                
+        elif current_section == 'suggestions':
+            if ':' in line:
+                key, value = line.split(':', 1)
+                data['suggestions'][key.lower().replace(' ', '_')] = value.strip()
+    
+    return data
 
 def nutrition_bar_chart(nutritional_values):
-    return f"""
-    <div id="nutrition-chart"></div>
-    <script>
-    (function() {{
-        const nutritionalValues = {nutritional_values};
-        const colors = {{
+    """Create nutrition bar chart"""
+    try:
+        # 确保所有值都是有效的数字并且在0-100之间
+        processed_values = {}
+        for nutrient, value in nutritional_values.items():
+            try:
+                # 确保值是一个数字，并限制在0-100之间
+                num_value = float(value)
+                processed_values[nutrient] = min(max(0, round(num_value)), 100)
+            except (ValueError, TypeError):
+                processed_values[nutrient] = 0
+
+        html = """
+        <div style="font-family: Arial, sans-serif; background-color: #f8f9fa; border-radius: 8px; padding: 16px;">
+        """
+        
+        colors = {
             'protein': '#4CAF50',
             'fat': '#F44336',
             'carbs': '#FFC107',
             'fiber': '#2196F3'
-        }};
-
-        function createNutritionBar(label, value, color) {{
-            const barContainer = document.createElement('div');
-            barContainer.style.marginBottom = '10px';
-
-            const labelSpan = document.createElement('span');
-            labelSpan.textContent = `${{label}}: ${{value}}%`;
-            barContainer.appendChild(labelSpan);
-
-            const barBackground = document.createElement('div');
-            barBackground.style.width = '100%';
-            barBackground.style.backgroundColor = '#e0e0e0';
-            barBackground.style.borderRadius = '5px';
-            barBackground.style.marginTop = '5px';
-
-            const bar = document.createElement('div');
-            bar.style.width = `${{value}}%`;
-            bar.style.height = '10px';
-            bar.style.backgroundColor = color;
-            bar.style.borderRadius = '5px';
-
-            barBackground.appendChild(bar);
-            barContainer.appendChild(barBackground);
-
-            return barContainer;
-        }}
-
-        const chartContainer = document.getElementById('nutrition-chart');
-        chartContainer.style.padding = '20px';
-        chartContainer.style.backgroundColor = '#f5f5f5';
-        chartContainer.style.borderRadius = '10px';
-
-        for (const [nutrient, value] of Object.entries(nutritionalValues)) {{
-            const bar = createNutritionBar(nutrient.charAt(0).toUpperCase() + nutrient.slice(1), value, colors[nutrient]);
-            chartContainer.appendChild(bar);
-        }}
-    }})();
-    </script>
-    """
+        }
+        
+        for nutrient, value in processed_values.items():
+            html += f"""
+            <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-weight: 500; font-size: 14px;">
+                        {nutrient.capitalize()}
+                    </span>
+                    <span style="font-size: 14px;">
+                        {value}%
+                    </span>
+                </div>
+                <div style="width: 100%; height: 8px; background-color: #e0e0e0; border-radius: 4px; overflow: hidden;">
+                    <div style="width: {value}%; height: 100%; background-color: {colors.get(nutrient, '#888')};">
+                    </div>
+                </div>
+            </div>
+            """
+        
+        html += "</div>"
+        return html
+    except Exception as e:
+        # 如果发生任何错误，返回一个简单的错误提示
+        return f"""
+        <div style="font-family: Arial, sans-serif; background-color: #fff3f3; color: #d32f2f; padding: 12px; border-radius: 8px; font-size: 14px;">
+            Unable to display nutritional analysis. Please try again.
+        </div>
+        """
 
 def init_session_state():
-    """初始化session state变量"""
+    """Initialize session state variables"""
     if 'detection_complete' not in st.session_state:
         st.session_state.detection_complete = False
     if 'original_detection' not in st.session_state:
@@ -236,7 +297,7 @@ def init_session_state():
         st.session_state.current_file_key = None
 
 def get_meal_type(current_time):
-    """根据当前时间判断用餐类型"""
+    """Determine meal type based on time"""
     hour = current_time.hour
     if 3 <= hour < 11:
         return "Breakfast"
@@ -246,7 +307,7 @@ def get_meal_type(current_time):
         return "Dinner"
 
 def format_meal_output(detected_items, meal_type):
-    """格式化输出结果，包含用餐类型和食物详情"""
+    """Format output with meal type and details"""
     items = [item.strip('• ').strip() for item in detected_items.split('\n') if item.strip()]
     meal_name = items[0].split('(')[0].strip() if items else "Unknown Meal"
     
@@ -256,11 +317,10 @@ def format_meal_output(detected_items, meal_type):
     return output, meal_name
 
 def handle_image_upload(uploaded_file):
-    """处理图片上传逻辑"""
+    """Handle image upload logic"""
     if uploaded_file:
         file_key = hash(uploaded_file.getvalue())
         
-        # 只有当上传新图片时才重置状态
         if st.session_state.current_file_key != file_key:
             st.session_state.current_file_key = file_key
             st.session_state.detection_complete = False
@@ -271,7 +331,7 @@ def handle_image_upload(uploaded_file):
     return False
 
 def detect_food_items(image_content):
-    """检测食物项目"""
+    """Detect food items from image"""
     detection_prompt = """
     List only the food items and their estimated weight in the image.
     Format as bullet points.
@@ -285,7 +345,7 @@ def main():
     st.set_page_config(page_title="Food-Recognition", page_icon="🥗", layout="wide")
     st.markdown(css, unsafe_allow_html=True)
     
-    # 初始化session state
+    # Initialize session state
     init_session_state()
     
     st.header("Meal Recommendation")
@@ -300,25 +360,20 @@ def main():
         try:
             image_content = input_image_setup(uploaded_file)
             
-            # 只在首次检测或新图片上传时进行检测
             if not st.session_state.detection_complete:
                 detected_items_response = detect_food_items(image_content)
                 current_time = datetime.now()
                 meal_type = get_meal_type(current_time)
                 formatted_output, meal_name = format_meal_output(detected_items_response, meal_type)
                 
-                # 保存原始检测结果
                 st.session_state.original_detection = formatted_output
                 st.session_state.meal_name = meal_name
                 st.session_state.detection_complete = True
                 st.session_state.edited_food_items = formatted_output
 
             st.subheader("Detected Food Items")
-            
-            # 使用编辑后的内容或原始检测结果
             current_items = st.session_state.edited_food_items or st.session_state.original_detection
             
-            # 编辑区域
             edited_items = st.text_area(
                 "Edit Food Items:",
                 value=current_items,
@@ -326,64 +381,102 @@ def main():
                 key="food_items_editor"
             )
             
-            # 保存按钮
             if st.button("Save Changes", key="save_food_items"):
                 st.session_state.edited_food_items = edited_items
                 st.success("Changes saved successfully!")
             
-            # 显示当前内容
             st.write("### Current Food Items")
             st.write(st.session_state.edited_food_items or st.session_state.original_detection)
 
-            # Recommendations section
-            st.write("### Nutritional Analysis and PCOS Recommendations")
             if st.button("Provide Recommendation", key="provide_recommendation"):
                 current_food_items = st.session_state.edited_food_items or st.session_state.original_detection
+                
+                # 把整体分析过程放在外层 try-except 中
                 try:
+                    # Nutrition Analysis
                     nutrition_prompt = textwrap.dedent(f"""
-                    Provide a nutritional analysis for the following dish:
-                    {current_food_items}
-                    Just simply display(no extra wordings) the nutritional values as percentages for protein, fat, carbs, and fiber.
-                    Format your response like this:
-                    Protein: X%
-                    Fat: Y%
-                    Carbs: Z%
-                    Fiber: W%
-                    Where X, Y, Z, and W are numeric values.
-                    """)
+                        Provide a nutritional analysis for the following dish:
+                        {current_food_items}
+                        Just simply display(no extra wordings) the nutritional values as percentages for protein, fat, carbs, and fiber.
+                        Format your response like this:
+                        Protein: X%
+                        Fat: Y%
+                        Carbs: Z%
+                        Fiber: W%
+                        Where X, Y, Z, and W are numeric values.
+                        """)
 
+                    # 单独处理营养分析的异常
                     nutrition_response = get_gemini_response("Nutrition Analysis", image_content, nutrition_prompt)
                     nutritional_values = parse_nutritional_values(nutrition_response)
-
-                    st.write("### Overall: ⭐⭐⭐⭐")
-                    st.write("### Summary:")
-                    st.write("Increase protein and fiber intake or undertake light exercise such as walks to reduce the sugar spike")
-
-                    st.write("### Details:")
-                    components.html(nutrition_bar_chart(nutritional_values), height=300, scrolling=True)
-
-                    # 保存营养分析结果
-                    st.session_state['nutritional_values'] = nutritional_values
-
-                    pcos_prompt = textwrap.dedent(f"""
-                    Act as a nutritionist specializing in managing PCOS (Polycystic Ovary Syndrome) and provide nutritional recommendations for the following dish:
-                    {current_food_items}
-                    Focus on these 4 key areas:
-                    1. Blood Sugar Balance
-                    2. Protein & Healthy Fats
-                    3. Fiber & Nutrients
-                    4. Inflammation & Portion Control
-                    Please provide simple, actionable feedback in these categories.
-                    """)
-
-                    pcos_response = get_gemini_response("PCOS Recommendations", image_content, pcos_prompt)
-                    st.subheader("PCOS Diet Recommendations")
-                    st.write(pcos_response)
-
-                    # 保存 PCOS 建议
-                    st.session_state['pcos_recommendations'] = pcos_response
                     
-                    st.session_state['current_meal_rating'] = 4
+                    if any(nutritional_values.values()):  # 确保至少有一个非零值
+                        st.write("### Nutritional Analysis")
+                        chart_html = nutrition_bar_chart(nutritional_values)
+                        components.html(chart_html, height=200, scrolling=False)
+                        # 保存有效的营养分析结果
+                        st.session_state['nutritional_values'] = nutritional_values
+                    else:
+                        st.warning("Could not determine nutritional values. Please try again.")
+                        st.session_state['nutritional_values'] = {}
+
+                    # PCOS Analysis - 不需要嵌套在内层 try-except 中
+                    current_time = datetime.now()
+                    meal_type = get_meal_type(current_time)
+                    pcos_response = get_pcos_analysis(current_food_items, image_content, meal_type)
+                    pcos_data = parse_pcos_response(pcos_response)
+
+                    # Display PCOS analysis
+                    st.write("### PCOS Analysis")
+                    st.markdown(f"**PCOS Score:** {pcos_data['pcos_score']}")
+                    
+                    # Display Focus Areas
+                    st.write("#### Focus Areas")
+                    for area, data in pcos_data['focus_areas'].items():
+                        col1, col2 = st.columns([3, 7])
+                        with col1:
+                            st.write(f"**{area}:**")
+                        with col2:
+                            # Create a progress bar
+                            progress_html = f"""
+                            <div style="background-color: #f0f2f6; border-radius: 10px; height: 20px; width: 100%">
+                                <div style="background-color: #1f77b4; width: {data['score']*20}%; height: 100%; border-radius: 10px">
+                                </div>
+                            </div>
+                            <p style="color: #666666; font-size: 14px; margin-top: 5px">{data['explanation']}</p>
+                            """
+                            st.markdown(progress_html, unsafe_allow_html=True)
+
+                    # Display Actionable Suggestions
+                    st.write("#### Actionable Suggestions")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.markdown("""
+                        <div style="background-color: #f8f9fa; padding: 10px; border-radius: 10px">
+                            <p style="color: #1f77b4; font-weight: bold">⚡ Quick Fix</p>
+                            <p style="font-size: 14px">{}</p>
+                        </div>
+                        """.format(pcos_data['suggestions'].get('quick_fix', '')), unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown("""
+                        <div style="background-color: #f8f9fa; padding: 10px; border-radius: 10px">
+                            <p style="color: #1f77b4; font-weight: bold">🔄 Swap Out</p>
+                            <p style="font-size: 14px">{}</p>
+                        </div>
+                        """.format(pcos_data['suggestions'].get('swap_out', '')), unsafe_allow_html=True)
+                    
+                    with col3:
+                        st.markdown("""
+                        <div style="background-color: #f8f9fa; padding: 10px; border-radius: 10px">
+                            <p style="color: #1f77b4; font-weight: bold">⭐ Pro Moves</p>
+                            <p style="font-size: 14px">{}</p>
+                        </div>
+                        """.format(pcos_data['suggestions'].get('pro_moves', '')), unsafe_allow_html=True)
+
+                    # Save analysis results
+                    st.session_state['pcos_analysis'] = pcos_data
 
                 except Exception as e:
                     st.error(f"Error during analysis: {str(e)}")
@@ -399,27 +492,25 @@ def main():
                 image = Image.open(uploaded_file)
                 image.save(image_bytes, format='PNG')
                 
-                # 获取当前时间和用餐类型
                 current_time = datetime.now()
                 meal_type = get_meal_type(current_time)
                 
-                # 构建完整的餐点记录
+                # Create meal log entry
                 new_meal = {
                     "meal_type": meal_type,
                     "name": st.session_state.get('meal_name', 'Unknown Meal'),
                     "details": st.session_state.edited_food_items,
                     "time": current_time.strftime("%I:%M %p"),
                     "date": current_time.strftime("%Y-%m-%d"),
-                    "rating": st.session_state.get('current_meal_rating', 0),
                     "image": image_bytes.getvalue(),
-                    # 保存营养分析结果
                     "nutrition_analysis": {
                         "values": st.session_state.get('nutritional_values', {}),
-                        "overall_rating": "⭐⭐⭐⭐",
-                        "summary": "Increase protein and fiber intake or undertake light exercise such as walks to reduce the sugar spike"
                     },
-                    # 保存 PCOS 建议
-                    "pcos_recommendations": st.session_state.get('pcos_recommendations', "")
+                    "pcos_analysis": {
+                        "score": st.session_state.get('pcos_analysis', {}).get('pcos_score', ''),
+                        "focus_areas": st.session_state.get('pcos_analysis', {}).get('focus_areas', {}),
+                        "suggestions": st.session_state.get('pcos_analysis', {}).get('suggestions', {})
+                    }
                 }
                 
                 if 'meal_log' not in st.session_state:

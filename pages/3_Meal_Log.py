@@ -24,7 +24,7 @@ div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
 }
 
 div[data-testid="column"] > div[data-testid="stVerticalBlock"] > div > button {
-    width: 100% !important;  /* 改为100%填充父容器 */
+    width: 100% !important;
     height: auto !important;
     min-height: 50px !important;
     padding: 8px 4px !important;
@@ -46,12 +46,12 @@ div[data-testid="stHorizontalBlock"] {
     padding: 8px !important;
 }
 
-/* Main container - 添加底部间距防止内容被遮挡 */
+/* Main container padding */
 .stApp {
-    padding-bottom: 80px !important;  /* 确保内容不被导航栏遮挡 */
+    padding-bottom: 80px !important;
 }
 
-/* 确保内容可以滚动 */
+/* Content scrolling */
 [data-testid="stAppViewContainer"] {
     height: calc(100vh - 80px) !important;
     overflow-y: auto !important;
@@ -80,16 +80,34 @@ div[data-testid="stHorizontalBlock"] {
     margin-bottom: 15px;
 }
 
-/* Actions buttons */
-.stButton > button {
-    border: none !important;
-    border-radius: 12px !important;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
-    transition: transform 0.2s !important;
+.analysis-card {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 10px;
+    margin: 10px 0;
 }
 
-.stButton > button:hover {
-    transform: translateY(-2px) !important;
+.progress-bar {
+    background-color: #f0f2f6;
+    border-radius: 10px;
+    height: 20px;
+    width: 100%;
+    margin: 5px 0;
+}
+
+.progress-bar-fill {
+    background-color: #1f77b4;
+    height: 100%;
+    border-radius: 10px;
+    transition: width 0.3s ease;
+}
+
+.suggestion-card {
+    background: #ffffff;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    margin: 8px 0;
 }
 </style>
 """
@@ -105,81 +123,122 @@ def navigation():
     with cols[2]:
         st.button("📝\nMeal Log", use_container_width=True, type="primary")
 
-def nutrition_bar_chart(nutritional_values):
-    """创建营养成分条形图"""
-    return f"""
-    <div id="nutrition-chart"></div>
-    <script>
-    (function() {{
-        const nutritionalValues = {nutritional_values};
-        const colors = {{
-            'protein': '#4CAF50',
-            'fat': '#F44336',
-            'carbs': '#FFC107',
-            'fiber': '#2196F3'
-        }};
-
-        function createNutritionBar(label, value, color) {{
-            const barContainer = document.createElement('div');
-            barContainer.style.marginBottom = '10px';
-
-            const labelSpan = document.createElement('span');
-            labelSpan.textContent = `${{label}}: ${{value}}%`;
-            barContainer.appendChild(labelSpan);
-
-            const barBackground = document.createElement('div');
-            barBackground.style.width = '100%';
-            barBackground.style.backgroundColor = '#e0e0e0';
-            barBackground.style.borderRadius = '5px';
-            barBackground.style.marginTop = '5px';
-
-            const bar = document.createElement('div');
-            bar.style.width = `${{value}}%`;
-            bar.style.height = '10px';
-            bar.style.backgroundColor = color;
-            bar.style.borderRadius = '5px';
-
-            barBackground.appendChild(bar);
-            barContainer.appendChild(barBackground);
-
-            return barContainer;
-        }}
-
-        const chartContainer = document.getElementById('nutrition-chart');
-        chartContainer.style.padding = '20px';
-        chartContainer.style.backgroundColor = '#f5f5f5';
-        chartContainer.style.borderRadius = '10px';
-
-        for (const [nutrient, value] of Object.entries(nutritionalValues)) {{
-            const bar = createNutritionBar(nutrient.charAt(0).toUpperCase() + nutrient.slice(1), value, colors[nutrient]);
-            chartContainer.appendChild(bar);
-        }}
-    }})();
-    </script>
-    """
-
 def create_meal_card(meal):
-    """创建简洁的餐点卡片"""
+    """Create a clean meal card with basic info"""
+    score_color = {
+        'Promising': 'green',
+        'Can Do Better': 'orange',
+        'Needs Improvement': 'red'
+    }.get(meal.get('pcos_analysis', {}).get('score', ''), 'gray')
+
     html = f"""
-    <div style="
-        background: white;
-        margin: 10px 0;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    ">
-        <div style="flex: 1">
-            <div style="color: #666; font-size: 0.9em;">{meal['meal_type']}</div>
-            <div style="font-weight: bold; margin: 5px 0;">{meal['name']}</div>
-            <div style="color: #888; font-size: 0.9em;">{meal['time']}</div>
-            <div style="color: #FFD700; margin-top: 5px;">{"★" * meal['rating']}</div>
+    <div class="meal-card">
+        <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div>
+                <div style="color: #666; font-size: 0.9em;">{meal['meal_type']}</div>
+                <div style="font-weight: bold; margin: 5px 0;">{meal['name']}</div>
+                <div style="color: #888; font-size: 0.9em;">{meal['time']} • {meal['date']}</div>
+            </div>
+            <div>
+                <span style="color: {score_color}; font-weight: bold;">
+                    {meal.get('pcos_analysis', {}).get('score', 'Not Analyzed')}
+                </span>
+            </div>
         </div>
     </div>
     """
     return html
+
+def create_focus_area_analysis(focus_areas):
+    """Create focus area analysis visualization"""
+    html = "<div class='analysis-card' style='padding: 10px; margin: 0;'>"
+    # 确保按照固定顺序显示所有四个领域
+    area_order = [
+        'Hormonal Balance & Insulin Sensitivity',
+        'Inflammation Control & Gut Health',
+        'Energy & Mental Health',
+        'Reproductive Health & Fertility'
+    ]
+    
+    for area in area_order:
+        data = focus_areas.get(area, {'score': 0, 'explanation': ''})
+        score = data.get('score', 0)
+        explanation = data.get('explanation', '')
+        html += f"""
+        <div style="margin-bottom: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <span style="font-weight: 500; font-size: 12px;">{area}</span>
+                <span style="font-size: 12px;">{score}/5</span>
+            </div>
+            <div style="width: 100%; height: 6px; background-color: #e0e0e0; border-radius: 3px; overflow: hidden; margin: 2px 0;">
+                <div style="width: {score*20}%; height: 100%; background-color: #1f77b4; border-radius: 3px;"></div>
+            </div>
+            <div style="font-size: 11px; color: #666; margin-top: 1px; line-height: 1.2;">
+                {explanation}
+            </div>
+        </div>
+        """
+    html += "</div>"
+    return html
+
+def create_suggestions_section(suggestions):
+    """Create suggestions section with cards"""
+    html = """
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+    """
+    
+    suggestions_data = [
+        ('⚡ Quick Fix', suggestions.get('quick_fix', '')),
+        ('🔄 Swap Out', suggestions.get('swap_out', '')),
+        ('⭐ Pro Moves', suggestions.get('pro_moves', ''))
+    ]
+    
+    for title, content in suggestions_data:
+        html += f"""
+        <div style="background: #ffffff; padding: 10px; border-radius: 8px; border: 1px solid #e0e0e0;">
+            <div style="font-weight: bold; color: #1f77b4; margin-bottom: 4px;">
+                {title}
+            </div>
+            <div style="font-size: 0.9em; color: #333; word-wrap: break-word; line-height: 1.4;">
+                {content}
+            </div>
+        </div>
+        """
+    
+    html += "</div>"
+    return html
+
+def nutrition_bar_chart(nutritional_values):
+    """Create nutrition bar chart"""
+    return f"""
+    <div class="analysis-card" style="padding: 12px; margin: 0;">
+        <div style="font-family: Arial, sans-serif;">
+            {' '.join([f'''
+            <div style="margin-bottom: 8px; width: 100%;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <span style="font-size: 14px; font-weight: 500;">
+                        {nutrient.capitalize()}
+                    </span>
+                    <span style="font-size: 14px;">
+                        {value}%
+                    </span>
+                </div>
+                <div style="width: 100%; height: 8px; background-color: #e0e0e0; border-radius: 4px; overflow: hidden;">
+                    <div style="width: {value}%; height: 100%; background-color: {
+                        {
+                            'protein': '#4CAF50',
+                            'fat': '#F44336',
+                            'carbs': '#FFC107',
+                            'fiber': '#2196F3'
+                        }.get(nutrient, '#888')
+                    };">
+                    </div>
+                </div>
+            </div>
+            ''' for nutrient, value in nutritional_values.items()])}
+        </div>
+    </div>
+    """
 
 def main():
     st.set_page_config(page_title="Meal Log", page_icon="🍽️", layout="wide")
@@ -187,7 +246,7 @@ def main():
     
     st.title("Meal Log")
 
-    # Add Meal button in the top left
+    # Add Meal button
     col1, col2, col3 = st.columns([2,8,2])
     with col1:
         if st.button("+ Add Meal", use_container_width=True):
@@ -195,49 +254,53 @@ def main():
 
     # Display meal log
     if 'meal_log' in st.session_state and st.session_state.meal_log:
-        # 显示每个餐点卡片
         for index, meal in enumerate(reversed(st.session_state.meal_log)):
-            # 创建两列布局
+            # Create two-column layout
             col1, col2 = st.columns([7, 3])
             
             with col1:
-                # 显示简洁的餐点信息
                 st.markdown(create_meal_card(meal), unsafe_allow_html=True)
             
             with col2:
-                # 显示图片
                 try:
                     if isinstance(meal['image'], bytes):
                         image = Image.open(io.BytesIO(meal['image']))
                         st.image(image, use_column_width=True)
-                except Exception as e:
+                except Exception:
                     st.info("No image available")
 
-            # 使用 expander 显示详细信息，移除 key 参数
-            with st.expander(f"Show Details for {meal['meal_type']}: {meal['name']}"):
-                # 基本信息
-                st.markdown(f"**Details:**")
+            # Meal details expander
+            with st.expander(f"Show Details"):
+                # Basic information
+                st.markdown(f"**Food Items:**")
                 st.markdown(meal['details'])
                 
-                # 营养分析
+                # Nutritional Analysis
                 st.markdown("### Nutritional Analysis")
-                st.markdown(f"**Overall Rating:** {meal['nutrition_analysis']['overall_rating']}")
-                st.markdown("**Summary:**")
-                st.markdown(meal['nutrition_analysis']['summary'])
-                
-                # 显示营养成分条形图
-                if 'values' in meal['nutrition_analysis']:
+                if 'nutrition_analysis' in meal and 'values' in meal['nutrition_analysis']:
                     st.components.v1.html(
                         nutrition_bar_chart(meal['nutrition_analysis']['values']), 
-                        height=300, 
-                        scrolling=True
+                        height=180
                     )
                 
-                # PCOS 建议
-                st.markdown("### PCOS Recommendations")
-                st.markdown(meal['pcos_recommendations'])
+                # PCOS Analysis
+                st.markdown("### PCOS Analysis")
+                if 'pcos_analysis' in meal:
+                    # Focus Areas
+                    st.markdown("#### Focus Areas")
+                    st.components.v1.html(
+                        create_focus_area_analysis(meal['pcos_analysis'].get('focus_areas', {})),
+                        height=280
+                    )
+                    
+                    # Suggestions
+                    st.markdown("#### Recommendations")
+                    st.components.v1.html(
+                        create_suggestions_section(meal['pcos_analysis'].get('suggestions', {})),
+                        height=300
+                    )
 
-                # 编辑和删除按钮
+                # Edit and Delete buttons
                 col3, col4 = st.columns([1, 1])
                 with col3:
                     if st.button("✏️ Edit", key=f"edit_meal_{index}"):
@@ -251,37 +314,37 @@ def main():
                             st.success("Meal deleted!")
                             st.experimental_rerun()
 
-        # 编辑功能
+        # Editing functionality
         if 'editing_meal' in st.session_state:
             meal_index = st.session_state.editing_meal
             meal = st.session_state.meal_log[meal_index]
             
-            st.markdown("---")  # 添加分隔线
+            st.markdown("---")
             with st.container():
                 st.subheader("✏️ Edit Meal")
                 
-                # 编辑表单
-                new_details = st.text_area("Meal Description", 
-                                         meal.get('details', ''), 
-                                         height=100,
-                                         key="edit_details")
+                # Edit form
+                new_details = st.text_area(
+                    "Meal Description", 
+                    meal.get('details', ''), 
+                    height=100,
+                    key="edit_details"
+                )
+                
                 col1, col2 = st.columns(2)
                 with col1:
-                    new_time = st.text_input("Time", 
-                                           meal.get('time', ''),
-                                           key="edit_time")
-                with col2:
-                    new_rating = st.slider("Rating", 
-                                         1, 5, 
-                                         meal.get('rating', 3),
-                                         key="edit_rating")
+                    new_time = st.text_input(
+                        "Time", 
+                        meal.get('time', ''),
+                        key="edit_time"
+                    )
                 
+                # Save and Cancel buttons
                 col3, col4 = st.columns([1,1])
                 with col3:
                     if st.button("💾 Save Changes", key="save_edit"):
                         meal['details'] = new_details
                         meal['time'] = new_time
-                        meal['rating'] = new_rating
                         del st.session_state.editing_meal
                         st.success("Changes saved!")
                         st.experimental_rerun()
